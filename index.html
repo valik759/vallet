@@ -7,462 +7,779 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <link rel="manifest" href="/manifest.json" />
-  <title>Мой Кошелёк</title>
+  <title>Vallet — Мой Кошелёк</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>" />
+  
+  <!-- Шрифты -->
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  
+  <!-- React & Babel -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+
+  <!-- Глобальные стили -->
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0D0F14; color: #E8EAF0; font-family: 'DM Sans', sans-serif; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
     input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
     input[type=date]::-webkit-calendar-picker-indicator { filter: invert(0.4); }
     ::-webkit-scrollbar { display: none; }
-    #app { max-width: 430px; margin: 0 auto; min-height: 100vh; padding-bottom: 40px; }
+    .hide-scroll::-webkit-scrollbar { display: none; }
+    .hide-scroll { scrollbar-width: none; }
+    #app-container { max-width: 430px; margin: 0 auto; min-height: 100vh; padding-bottom: 40px; }
     button { cursor: pointer; font-family: 'DM Sans', sans-serif; }
     input, select { font-family: 'DM Sans', sans-serif; outline: none; }
     select { -webkit-appearance: none; appearance: none; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
   </style>
 </head>
 <body>
-<div id="app">
-  <div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#6B7280;font-size:16px;">Загрузка…</div>
-</div>
+  <div id="root"></div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <!-- Импорт Firebase как ES Модулей (глобально) -->
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js';
+    import * as FirebaseAuth from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js';
+    import * as FirebaseFirestore from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js';
 
-<script>
-const { useState, useEffect } = React;
-const h = React.createElement;
+    window.FirebaseApp = { initializeApp };
+    window.FirebaseAuth = FirebaseAuth;
+    window.FirebaseFirestore = FirebaseFirestore;
+  </script>
 
-const SK = "fw-txs-v4";
-const BK = "fw-budget-v4";
+  <!-- Основной код приложения (JSX) -->
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const { initializeApp } = window.FirebaseApp;
+    const { getAuth, signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } = window.FirebaseAuth;
+    const { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, deleteDoc } = window.FirebaseFirestore;
 
-// ── Валюты ───────────────────────────────────────────────────────────────────
-const CURRENCIES = [
-  { id:"BYN", symbol:"Br",  flag:"🇧🇾", label:"Белорусский рубль" },
-  { id:"RUB", symbol:"₽",   flag:"🇷🇺", label:"Российский рубль"  },
-  { id:"USD", symbol:"$",   flag:"🇺🇸", label:"Доллар США"        },
-  { id:"EUR", symbol:"€",   flag:"🇪🇺", label:"Евро"              },
-];
-const DEFAULT_CURRENCY = "BYN";
-const getCurrency = id => CURRENCIES.find(c => c.id === id) || CURRENCIES[0];
+    const firebaseConfig = {
+      apiKey: "AIzaSyApziJP4jg73KNgDcIv-46aybC9xvb1CNs",
+      authDomain: "vallet-cloud.firebaseapp.com",
+      projectId: "vallet-cloud",
+      storageBucket: "vallet-cloud.firebasestorage.app",
+      messagingSenderId: "482895480464",
+      appId: "1:482895480464:web:6129c65bc8286ff4e2ba15"
+    };
 
-// ── Категории ────────────────────────────────────────────────────────────────
-const CATS = {
-  income: [
-    { id:"salary",    label:"Зарплата",    icon:"💼" },
-    { id:"freelance", label:"Фриланс",     icon:"💻" },
-    { id:"gift",      label:"Подарок",     icon:"🎁" },
-    { id:"invest",    label:"Инвестиции",  icon:"📈" },
-    { id:"other_in",  label:"Прочее",      icon:"➕" },
-  ],
-  expense: [
-    { id:"food",          label:"Еда",          icon:"🍔" },
-    { id:"transport",     label:"Транспорт",     icon:"🚌" },
-    { id:"housing",       label:"Жильё",         icon:"🏠" },
-    { id:"health",        label:"Здоровье",      icon:"💊" },
-    { id:"entertainment", label:"Развлечения",   icon:"🎬" },
-    { id:"clothing",      label:"Одежда",        icon:"👕" },
-    { id:"education",     label:"Образование",   icon:"📚" },
-    { id:"tech",          label:"Техника",       icon:"📱" },
-    { id:"cafe",          label:"Кафе",          icon:"☕" },
-    { id:"other_ex",      label:"Прочее",        icon:"➖" },
-  ]
-};
-const ALL_CATS = [...CATS.income, ...CATS.expense];
-const getCat = id => ALL_CATS.find(c => c.id === id) || { label: id, icon: "•" };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+    });
 
-const PAL = ["#6EE7B7","#34D399","#FCD34D","#FBBF24","#A78BFA","#818CF8","#F87171","#FB923C","#60A5FA","#F472B6"];
+    // ── Константы ────────────────────────────────────────────────────────────────
+    const CURRENCIES = [
+      { id:"BYN", symbol:"Br",  flag:"🇧🇾", label:"Белорусский рубль" },
+      { id:"RUB", symbol:"₽",   flag:"🇷🇺", label:"Российский рубль"  },
+      { id:"USD", symbol:"$",   flag:"🇺🇸", label:"Доллар США"        },
+      { id:"EUR", symbol:"€",   flag:"🇪🇺", label:"Евро"              },
+    ];
+    const DEFAULT_CURRENCY = "BYN";
+    const getCurrency = id => CURRENCIES.find(c => c.id === id) || CURRENCIES[0];
 
-// ── Форматирование ───────────────────────────────────────────────────────────
-const fmt = (n, currId) => {
-  const cur = getCurrency(currId || DEFAULT_CURRENCY);
-  const num = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n);
-  // USD/EUR — символ спереди, остальные сзади
-  return (currId === "USD" || currId === "EUR")
-    ? cur.symbol + num
-    : num + " " + cur.symbol;
-};
-const fmtDate = iso => new Date(iso).toLocaleDateString("ru-RU", { day:"numeric", month:"short" });
-const todayStr = () => new Date().toISOString().split("T")[0];
+    const DEFAULT_CATS = {
+      income: [
+        { id:"salary",    label:"Зарплата",    icon:"💼" },
+        { id:"freelance", label:"Фриланс",     icon:"💻" },
+        { id:"gift",      label:"Подарок",     icon:"🎁" },
+        { id:"invest",    label:"Инвестиции",  icon:"📈" },
+      ],
+      expense: [
+        { id:"food",          label:"Еда",          icon:"🍔" },
+        { id:"transport",     label:"Транспорт",     icon:"🚌" },
+        { id:"housing",       label:"Жильё",         icon:"🏠" },
+        { id:"entertainment", label:"Развлечения",   icon:"🎬" },
+        { id:"cafe",          label:"Кафе",          icon:"☕" },
+      ]
+    };
 
-// ── Группировка по валюте для итогов ─────────────────────────────────────────
-function sumByCurrency(txs, type) {
-  const map = {};
-  txs.filter(t => t.type === type).forEach(t => {
-    const cur = t.currency || DEFAULT_CURRENCY;
-    map[cur] = (map[cur] || 0) + t.amount;
-  });
-  return map;
-}
+    const PAL = ["#6EE7B7","#34D399","#FCD34D","#FBBF24","#A78BFA","#818CF8","#F87171","#FB923C","#60A5FA","#F472B6"];
 
-// ── SVG Donut ─────────────────────────────────────────────────────────────────
-function DonutChart({ data }) {
-  const total = data.reduce((s, d) => s + d.value, 0);
-  if (!total) return null;
-  const cx = 80, cy = 80, r = 58, ir = 36;
-  let angle = -Math.PI / 2;
-  const slices = data.map((d, i) => {
-    const sweep = (d.value / total) * 2 * Math.PI;
-    const x1 = cx + r * Math.cos(angle), y1 = cy + r * Math.sin(angle);
-    angle += sweep;
-    const x2 = cx + r * Math.cos(angle), y2 = cy + r * Math.sin(angle);
-    const xi1 = cx + ir * Math.cos(angle), yi1 = cy + ir * Math.sin(angle);
-    const xi2 = cx + ir * Math.cos(angle - sweep), yi2 = cy + ir * Math.sin(angle - sweep);
-    const lg = sweep > Math.PI ? 1 : 0;
-    return h("path", { key: i, fill: PAL[i % PAL.length],
-      d: `M${x1} ${y1} A${r} ${r} 0 ${lg} 1 ${x2} ${y2} L${xi1} ${yi1} A${ir} ${ir} 0 ${lg} 0 ${xi2} ${yi2}Z` });
-  });
-  return h("div", { style:{ display:"flex", flexDirection:"column", alignItems:"center" } },
-    h("svg", { width:160, height:160, viewBox:"0 0 160 160" }, ...slices),
-    h("div", { style:{ display:"flex", flexWrap:"wrap", gap:"5px 12px", marginTop:8, justifyContent:"center" } },
-      data.map((d, i) =>
-        h("div", { key:d.name, style:{ display:"flex", alignItems:"center", gap:5, fontSize:12, color:"#9CA3AF" } },
-          h("div", { style:{ width:8, height:8, borderRadius:"50%", background: PAL[i % PAL.length] } }),
-          d.icon + " " + d.name
-        )
-      )
-    )
-  );
-}
+    // ── Вспомогательные функции ──────────────────────────────────────────────────
+    const fmt = (n, currId) => {
+      const cur = getCurrency(currId || DEFAULT_CURRENCY);
+      const num = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(n);
+      return (currId === "USD" || currId === "EUR") ? cur.symbol + num : num + " " + cur.symbol;
+    };
+    const fmtDate = iso => new Date(iso).toLocaleDateString("ru-RU", { day:"numeric", month:"short" });
+    const todayStr = () => new Date().toISOString().split("T")[0];
+    const addMonths = (str, delta) => {
+      const [y, m] = str.split('-').map(Number);
+      const date = new Date(y, m - 1 + delta, 1);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    };
+    const formatMonth = str => {
+      const d = new Date(str + "-01");
+      const name = d.toLocaleDateString("ru-RU", { month: "long" });
+      return name.charAt(0).toUpperCase() + name.slice(1) + " " + d.getFullYear();
+    };
+    function sumByCurrency(txs, type) {
+      const map = {};
+      txs.filter(t => t.type === type).forEach(t => {
+        const cur = t.currency || DEFAULT_CURRENCY;
+        map[cur] = (map[cur] || 0) + t.amount;
+      });
+      return map;
+    }
 
-// ── Мини-суммарная строка по валютам ─────────────────────────────────────────
-function CurrencyTotals({ map, color }) {
-  const entries = Object.entries(map).filter(([,v]) => v > 0);
-  if (!entries.length) return h("div",{style:{fontSize:17,fontWeight:600,color,fontFamily:"'DM Mono',monospace"}},"0 Br");
-  return h("div", { style:{ display:"flex", flexDirection:"column", gap:1 } },
-    entries.map(([cur, val]) =>
-      h("div", { key:cur, style:{ fontSize:entries.length > 1 ? 14 : 17, fontWeight:600, color, fontFamily:"'DM Mono',monospace" } },
-        fmt(val, cur)
-      )
-    )
-  );
-}
+    // ── UI Компоненты ────────────────────────────────────────────────────────────
+    function DonutChart({ data }) {
+      const total = data.reduce((s, d) => s + d.value, 0);
+      if (!total) return null;
+      const cx = 80, cy = 80, r = 58, ir = 36;
+      let angle = -Math.PI / 2;
+      const slices = data.map((d, i) => {
+        const sweep = (d.value / total) * 2 * Math.PI;
+        const x1 = cx + r * Math.cos(angle), y1 = cy + r * Math.sin(angle);
+        angle += sweep;
+        const x2 = cx + r * Math.cos(angle), y2 = cy + r * Math.sin(angle);
+        const xi1 = cx + ir * Math.cos(angle), yi1 = cy + ir * Math.sin(angle);
+        const xi2 = cx + ir * Math.cos(angle - sweep), yi2 = cy + ir * Math.sin(angle - sweep);
+        const lg = sweep > Math.PI ? 1 : 0;
+        return <path key={i} fill={PAL[i % PAL.length]} d={`M${x1} ${y1} A${r} ${r} 0 ${lg} 1 ${x2} ${y2} L${xi1} ${yi1} A${ir} ${ir} 0 ${lg} 0 ${xi2} ${yi2}Z`} />;
+      });
+      return (
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
+          <svg width={160} height={160} viewBox="0 0 160 160">{slices}</svg>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:"5px 12px", marginTop:8, justifyContent:"center" }}>
+            {data.map((d, i) => (
+              <div key={d.name} style={{ display:"flex", alignItems:"center", gap:5, fontSize:12, color:"#9CA3AF" }}>
+                <div style={{ width:8, height:8, borderRadius:"50%", background: PAL[i % PAL.length] }} />
+                {d.icon} {d.name}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
 
-// ── Селектор валюты ───────────────────────────────────────────────────────────
-function CurrencySelect({ value, onChange }) {
-  return h("div", { style:{ position:"relative" } },
-    h("select", {
-      value,
-      onChange: ev => onChange(ev.target.value),
-      style:{
-        width:"100%", background:"#22252F", border:"1px solid #2D3139", borderRadius:12,
-        padding:"11px 40px 11px 14px", color:"#E8EAF0", fontSize:15,
-        backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236B7280' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`,
-        backgroundRepeat:"no-repeat", backgroundPosition:"right 14px center",
+    function CurrencyTotals({ map, color }) {
+      const entries = Object.entries(map).filter(([,v]) => v > 0);
+      if (!entries.length) return <div style={{fontSize:17,fontWeight:600,color,fontFamily:"'DM Mono',monospace"}}>0 Br</div>;
+      return (
+        <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
+          {entries.map(([cur, val]) => (
+            <div key={cur} style={{ fontSize:entries.length > 1 ? 14 : 17, fontWeight:600, color, fontFamily:"'DM Mono',monospace" }}>
+              {fmt(val, cur)}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ── ГЛАВНОЕ ПРИЛОЖЕНИЕ ─────────────────────────────────────────────────────
+    function App() {
+      const [user, setUser] = useState(null);
+      const [loadingAuth, setLoadingAuth] = useState(true);
+      const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+      const [authMode, setAuthMode] = useState("login");
+      const [email, setEmail] = useState("");
+      const [password, setPassword] = useState("");
+      const [authError, setAuthError] = useState("");
+      const [authProcessing, setAuthProcessing] = useState(false);
+
+      const [tab, setTab] = useState(0);
+      const [txs, setTxs] = useState([]);
+      const [budget, setBudget] = useState(0);
+      const [cats, setCats] = useState(DEFAULT_CATS);
+      
+      const [monthStr, setMonthStr] = useState(todayStr().slice(0, 7)); 
+      
+      const [form, setForm] = useState({ type:"expense", amount:"", category:"", note:"", date: todayStr(), currency: DEFAULT_CURRENCY });
+      const [editBudget, setEditBudget] = useState(false);
+      const [budgetInput, setBudgetInput] = useState("");
+      
+      const [filter, setFilter] = useState("all"); 
+      const [catFilter, setCatFilter] = useState("all"); 
+      
+      const [settingsTab, setSettingsTab] = useState("account");
+      const [newCatLabel, setNewCatLabel] = useState("");
+      const [newCatIcon, setNewCatIcon] = useState("✨");
+      const [saved, setSaved] = useState(false);
+
+      useEffect(() => {
+        const onOnline = () => setIsOffline(false);
+        const onOffline = () => setIsOffline(true);
+        window.addEventListener('online', onOnline);
+        window.addEventListener('offline', onOffline);
+        return () => { window.removeEventListener('online', onOnline); window.removeEventListener('offline', onOffline); };
+      }, []);
+
+      useEffect(() => {
+        // Ждем загрузки библиотек (решение проблемы асинхронности)
+        const checkAuth = setInterval(() => {
+          if (window.FirebaseAuth) {
+            clearInterval(checkAuth);
+            onAuthStateChanged(auth, (usr) => {
+              setUser(usr);
+              setLoadingAuth(false);
+            });
+          }
+        }, 100);
+        return () => clearInterval(checkAuth);
+      }, []);
+
+      // Синхронизация данных пользователя
+      useEffect(() => {
+        if (!user) return;
+
+        // Внимание: пути изменены на чистые (без artifacts/appId) для твоего личного облака!
+        const txsRef = collection(db, 'users', user.uid, 'transactions');
+        const unsubTxs = onSnapshot(txsRef, (snap) => {
+          const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          data.sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0));
+          setTxs(data);
+        }, err => console.error(err));
+
+        const budgetRef = doc(db, 'users', user.uid, 'settings', 'budget');
+        const unsubBudget = onSnapshot(budgetRef, (snap) => {
+          if (snap.exists()) setBudget(snap.data().amount || 0);
+        }, err => console.error(err));
+
+        const catsRef = doc(db, 'users', user.uid, 'settings', 'categories');
+        const unsubCats = onSnapshot(catsRef, (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            setCats({ income: data.income || DEFAULT_CATS.income, expense: data.expense || DEFAULT_CATS.expense });
+          } else {
+            setCats(DEFAULT_CATS);
+          }
+        }, err => console.error(err));
+
+        return () => { unsubTxs(); unsubBudget(); unsubCats(); };
+      }, [user]);
+
+      useEffect(() => {
+        const currentCats = cats[form.type];
+        if (currentCats.length > 0 && !currentCats.find(c => c.id === form.category)) {
+          setForm(f => ({ ...f, category: currentCats[0].id }));
+        }
+      }, [form.type, cats]);
+
+      // ── Обработчики Авторизации ──
+      const handleAuthSubmit = async (e) => {
+        e.preventDefault();
+        setAuthError("");
+        setAuthProcessing(true);
+        try {
+          if (authMode === "login") await signInWithEmailAndPassword(auth, email, password);
+          else await createUserWithEmailAndPassword(auth, email, password);
+        } catch (err) {
+          setAuthError(err.code === "auth/invalid-credential" ? "Неверный email или пароль" : 
+                       err.code === "auth/email-already-in-use" ? "Email уже используется" : err.message);
+        } finally {
+          setAuthProcessing(false);
+        }
+      };
+
+      const handleGuestLogin = async () => {
+        setAuthProcessing(true);
+        try { await signInAnonymously(auth); } 
+        catch (err) { setAuthError("Ошибка гостевого входа: " + err.message); } 
+        finally { setAuthProcessing(false); }
+      };
+
+      const handleLogout = async () => {
+        await signOut(auth);
+        setTab(0);
+      };
+
+      // ── Обработчики Облака ──
+      const handleAdd = async () => {
+        if (!user) return;
+        const amt = parseFloat(form.amount);
+        if (!amt || amt <= 0 || !form.category) return;
+
+        const newTx = { ...form, amount: amt, timestamp: Date.now() };
+        const newDocRef = doc(collection(db, 'users', user.uid, 'transactions'));
+        await setDoc(newDocRef, newTx);
+
+        setForm(f => ({ ...f, amount:"", note:"", date: todayStr() }));
+        setSaved(true);
+        setTimeout(() => { setSaved(false); setTab(1); }, 900);
+      };
+
+      const handleDelete = async (id) => {
+        if (!user) return;
+        await deleteDoc(doc(db, 'users', user.uid, 'transactions', id));
+      };
+
+      const saveBudget = async () => {
+        if (!user) return;
+        const v = parseFloat(budgetInput) || 0;
+        await setDoc(doc(db, 'users', user.uid, 'settings', 'budget'), { amount: v });
+        setEditBudget(false);
+      };
+
+      const saveCategory = async () => {
+        if (!user || !newCatLabel.trim() || !newCatIcon.trim()) return;
+        const newId = "c_" + Date.now();
+        const updatedCats = { ...cats };
+        updatedCats[settingsTab] = [...updatedCats[settingsTab], { id: newId, label: newCatLabel.trim(), icon: newCatIcon.trim() }];
+        await setDoc(doc(db, 'users', user.uid, 'settings', 'categories'), updatedCats);
+        setNewCatLabel("");
+        setNewCatIcon("✨");
+      };
+
+      const deleteCategory = async (id) => {
+        if (!user) return;
+        const updatedCats = { ...cats };
+        updatedCats[settingsTab] = updatedCats[settingsTab].filter(c => c.id !== id);
+        await setDoc(doc(db, 'users', user.uid, 'settings', 'categories'), updatedCats);
+      };
+
+      // Стили UI
+      const card = { background:"#181B23", borderRadius:18, padding:"16px", marginBottom:12, border:"1px solid #22252F" };
+      const lbl  = { fontSize:11, color:"#6B7280", letterSpacing:1.5, textTransform:"uppercase", display:"block", marginBottom:6 };
+      const inp  = { width:"100%", background:"#22252F", border:"1px solid #2D3139", borderRadius:12, padding:"11px 14px", color:"#E8EAF0", fontSize:16 };
+      const TABS = ["Обзор","История","Добавить","Настройки"];
+
+      if (loadingAuth) {
+        return (
+          <div id="app-container" style={{display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div style={{color:"#6B7280",fontSize:16, animation: "pulse 1.5s infinite"}}>Загрузка Vallet…</div>
+          </div>
+        );
       }
-    },
-      CURRENCIES.map(cur =>
-        h("option", { key:cur.id, value:cur.id, style:{background:"#22252F"} },
-          cur.flag + "  " + cur.id + " — " + cur.label
-        )
-      )
-    )
-  );
-}
 
-// ── App ───────────────────────────────────────────────────────────────────────
-function App() {
-  const [tab, setTab] = useState(0);
-  const [txs, setTxs] = useState([]);
-  const [budget, setBudget] = useState(0);
-  const [form, setForm] = useState({ type:"expense", amount:"", category:"food", note:"", date: todayStr(), currency: DEFAULT_CURRENCY });
-  const [editBudget, setEditBudget] = useState(false);
-  const [budgetInput, setBudgetInput] = useState("");
-  const [filter, setFilter] = useState("all");
-  const [saved, setSaved] = useState(false);
+      if (!user) {
+        return (
+          <div id="app-container" style={{display:"flex",flexDirection:"column",justifyContent:"center",padding:"20px"}}>
+            <div style={{textAlign:"center", marginBottom:40}}>
+              <div style={{fontSize:54, marginBottom:10}}>💰</div>
+              <h1 style={{fontSize:28, fontWeight:700, letterSpacing:-1}}>Vallet</h1>
+              <p style={{color:"#9CA3AF", fontSize:14, marginTop:4}}>Твой личный умный кошелек</p>
+            </div>
 
-  useEffect(() => {
-    try { const r = localStorage.getItem(SK); if (r) setTxs(JSON.parse(r)); } catch {}
-    try { const b = localStorage.getItem(BK); if (b) setBudget(parseFloat(b)||0); } catch {}
-  }, []);
+            <div style={card}>
+              <div style={{display:"flex",background:"#22252F",borderRadius:12,padding:4,marginBottom:20}}>
+                <button onClick={()=>setAuthMode("login")} style={{flex:1,padding:"10px 0",background:authMode==="login"?"#374151":"transparent",border:"none",borderRadius:9,color:authMode==="login"?"#fff":"#9CA3AF",fontWeight:authMode==="login"?600:400,fontSize:14}}>Вход</button>
+                <button onClick={()=>setAuthMode("register")} style={{flex:1,padding:"10px 0",background:authMode==="register"?"#374151":"transparent",border:"none",borderRadius:9,color:authMode==="register"?"#fff":"#9CA3AF",fontWeight:authMode==="register"?600:400,fontSize:14}}>Регистрация</button>
+              </div>
 
-  const saveTxs = ts => { setTxs(ts); try { localStorage.setItem(SK, JSON.stringify(ts)); } catch {} };
+              <form onSubmit={handleAuthSubmit}>
+                <div style={{marginBottom:14}}>
+                  <label style={lbl}>Email</label>
+                  <input type="email" required value={email} onChange={e=>setEmail(e.target.value)} style={inp} placeholder="mail@example.com" />
+                </div>
+                <div style={{marginBottom:24}}>
+                  <label style={lbl}>Пароль</label>
+                  <input type="password" required value={password} onChange={e=>setPassword(e.target.value)} style={inp} placeholder="••••••••" minLength={6} />
+                </div>
+                
+                {authError && <div style={{color:"#F87171", fontSize:13, marginBottom:14, textAlign:"center"}}>{authError}</div>}
 
-  const incomeMap  = sumByCurrency(txs, "income");
-  const expenseMap = sumByCurrency(txs, "expense");
+                <button type="submit" disabled={authProcessing} style={{
+                  width:"100%",padding:"14px 0",border:"none",borderRadius:14,color:"#fff",fontWeight:700,fontSize:16,
+                  background:"linear-gradient(90deg,#059669,#34D399)", boxShadow:"0 4px 20px rgba(52,211,153,.25)", opacity: authProcessing ? 0.7 : 1
+                }}>
+                  {authProcessing ? "Загрузка..." : (authMode === "login" ? "Войти в аккаунт" : "Создать аккаунт")}
+                </button>
+              </form>
 
-  // Баланс только по BYN для прогресс-бара бюджета
-  const totalIncomeBYN  = incomeMap[DEFAULT_CURRENCY]  || 0;
-  const totalExpenseBYN = expenseMap[DEFAULT_CURRENCY] || 0;
-  const balanceBYN = totalIncomeBYN - totalExpenseBYN;
+              <div style={{textAlign:"center", margin:"20px 0", color:"#4B5563", fontSize:12, textTransform:"uppercase", letterSpacing:1}}>или</div>
 
-  const expByCat = CATS.expense.map(cat => ({
-    name: cat.label, icon: cat.icon,
-    value: txs.filter(t => t.type==="expense" && t.category===cat.id && (t.currency||DEFAULT_CURRENCY)===DEFAULT_CURRENCY)
-              .reduce((s,t) => s+t.amount, 0)
-  })).filter(c => c.value > 0);
+              <button onClick={handleGuestLogin} disabled={authProcessing} style={{
+                width:"100%",padding:"14px 0",border:"1px solid #374151",borderRadius:14,color:"#E8EAF0",fontWeight:600,fontSize:15, background:"transparent"
+              }}>
+                Продолжить как гость
+              </button>
+            </div>
+          </div>
+        );
+      }
 
-  const handleAdd = () => {
-    const amt = parseFloat(form.amount);
-    if (!amt || amt <= 0) return;
-    saveTxs([{ id: Date.now(), ...form, amount: amt }, ...txs]);
-    setForm({ type:"expense", amount:"", category:"food", note:"", date: todayStr(), currency: DEFAULT_CURRENCY });
-    setSaved(true);
-    setTimeout(() => { setSaved(false); setTab(1); }, 900);
-  };
+      // Вычисления
+      const allCats = [...cats.income, ...cats.expense];
+      const getCatObj = id => allCats.find(c => c.id === id) || { label: "Удалено", icon: "•" };
 
-  const saveBudget = () => {
-    const v = parseFloat(budgetInput) || 0;
-    setBudget(v);
-    try { localStorage.setItem(BK, String(v)); } catch {}
-    setEditBudget(false);
-  };
+      const totalIncomeBYN  = sumByCurrency(txs, "income")[DEFAULT_CURRENCY]  || 0;
+      const totalExpenseBYN = sumByCurrency(txs, "expense")[DEFAULT_CURRENCY] || 0;
+      const lifetimeBalanceBYN = totalIncomeBYN - totalExpenseBYN;
 
-  const pct = budget > 0 ? Math.min((totalExpenseBYN/budget)*100, 100) : 0;
-  const pctColor = pct > 85 ? "#F87171" : pct > 60 ? "#FBBF24" : "#6EE7B7";
-  const filtered = txs.filter(t => filter==="all" || t.type===filter);
+      const monthlyTxs = txs.filter(t => t.date.startsWith(monthStr));
+      const monthIncMap = sumByCurrency(monthlyTxs, "income");
+      const monthExpMap = sumByCurrency(monthlyTxs, "expense");
+      const monthTotalExpBYN = monthExpMap[DEFAULT_CURRENCY] || 0;
 
-  const card = { background:"#181B23", borderRadius:18, padding:"16px", marginBottom:12, border:"1px solid #22252F" };
-  const lbl  = { fontSize:11, color:"#6B7280", letterSpacing:1.5, textTransform:"uppercase", display:"block", marginBottom:6 };
-  const inp  = { width:"100%", background:"#22252F", border:"1px solid #2D3139", borderRadius:12, padding:"11px 14px", color:"#E8EAF0", fontSize:16 };
-  const TABS = ["Обзор","История","Добавить"];
+      const expByCat = cats.expense.map(cat => ({
+        name: cat.label, icon: cat.icon,
+        value: monthlyTxs.filter(t => t.type==="expense" && t.category===cat.id && (t.currency||DEFAULT_CURRENCY)===DEFAULT_CURRENCY)
+                  .reduce((s,t) => s+t.amount, 0)
+      })).filter(c => c.value > 0);
 
-  return h("div", null,
+      const pct = budget > 0 ? Math.min((monthTotalExpBYN/budget)*100, 100) : 0;
+      const pctColor = pct > 85 ? "#F87171" : pct > 60 ? "#FBBF24" : "#6EE7B7";
+      
+      const filteredTxs = monthlyTxs.filter(t => {
+        const matchType = filter === "all" || t.type === filter;
+        const matchCat  = catFilter === "all" || t.category === catFilter;
+        return matchType && matchCat;
+      });
 
-    // ── Header ───────────────────────────────────────────────────────────
-    h("div", { style:{ padding:"44px 20px 16px", background:"linear-gradient(160deg,#1A1D26,#0D0F14)" } },
-      h("div", { style:{ fontSize:11, color:"#6B7280", letterSpacing:2.5, textTransform:"uppercase", fontWeight:500 } }, "Мой кошелёк"),
+      const availableFilterCats = filter === "all" ? allCats : cats[filter];
 
-      // Баланс BYN
-      h("div", { style:{ marginTop:4, fontSize:30, fontWeight:700, letterSpacing:-1, fontFamily:"'DM Mono',monospace",
-                         color: balanceBYN >= 0 ? "#6EE7B7" : "#F87171" } },
-        (balanceBYN >= 0 ? "+" : "") + fmt(balanceBYN, DEFAULT_CURRENCY)
-      ),
-      h("div", { style:{ fontSize:11, color:"#4B5563", marginTop:2, marginBottom:10 } }, "баланс в BYN"),
+      return (
+        <div id="app-container">
+          
+          {/* HEADER */}
+          <div style={{ padding:"44px 20px 16px", background:"linear-gradient(160deg,#1A1D26,#0D0F14)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ fontSize:11, color:"#6B7280", letterSpacing:2.5, textTransform:"uppercase", fontWeight:500 }}>Общий баланс</div>
+              {isOffline && (
+                <div style={{ fontSize:10, color:"#FBBF24", background:"rgba(251,191,36,0.1)", padding:"4px 8px", borderRadius:8, display:"flex", alignItems:"center", gap:4 }}>
+                  <span style={{width:6,height:6,borderRadius:"50%",background:"#FBBF24"}}/> Оффлайн
+                </div>
+              )}
+            </div>
+            
+            <div style={{ marginTop:4, fontSize:30, fontWeight:700, letterSpacing:-1, fontFamily:"'DM Mono',monospace", color: lifetimeBalanceBYN >= 0 ? "#6EE7B7" : "#F87171" }}>
+              {(lifetimeBalanceBYN >= 0 ? "+" : "") + fmt(lifetimeBalanceBYN, DEFAULT_CURRENCY)}
+            </div>
 
-      // Карточки доходы / расходы
-      h("div", { style:{ display:"flex", gap:10 } },
-        h("div", { style:{ flex:1, background:"#181B23", borderRadius:14, padding:"10px 13px", border:"1px solid #22252F" } },
-          h("div", { style:{ fontSize:10, color:"#6B7280", textTransform:"uppercase", letterSpacing:1.5, marginBottom:4 } },
-            h("span",{style:{color:"#6EE7B7"}},"↑"), "  Доходы"),
-          h(CurrencyTotals, { map: incomeMap, color:"#6EE7B7" })
-        ),
-        h("div", { style:{ flex:1, background:"#181B23", borderRadius:14, padding:"10px 13px", border:"1px solid #22252F" } },
-          h("div", { style:{ fontSize:10, color:"#6B7280", textTransform:"uppercase", letterSpacing:1.5, marginBottom:4 } },
-            h("span",{style:{color:"#F87171"}},"↓"), "  Расходы"),
-          h(CurrencyTotals, { map: expenseMap, color:"#F87171" })
-        )
-      )
-    ),
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop: 24, marginBottom: 12 }}>
+              <button onClick={() => setMonthStr(addMonths(monthStr, -1))} style={{ background:"none", border:"none", color:"#9CA3AF", fontSize:20, padding:"0 10px" }}>←</button>
+              <div style={{ fontSize:14, fontWeight:600, color:"#E8EAF0" }}>{formatMonth(monthStr)}</div>
+              <button onClick={() => setMonthStr(addMonths(monthStr, 1))} style={{ background:"none", border:"none", color:"#9CA3AF", fontSize:20, padding:"0 10px" }}>→</button>
+            </div>
 
-    // ── Tab Bar ───────────────────────────────────────────────────────────
-    h("div", { style:{ display:"flex", background:"#181B23", borderBottom:"1px solid #22252F", position:"sticky", top:0, zIndex:10 } },
-      TABS.map((t,i) =>
-        h("button", { key:t, onClick:()=>setTab(i),
-          style:{ flex:1, padding:"12px 0", background:"none", border:"none",
-                  color: tab===i?"#6EE7B7":"#6B7280", fontWeight: tab===i?600:400, fontSize:14,
-                  borderBottom: tab===i?"2px solid #6EE7B7":"2px solid transparent", transition:"all .2s" }
-        }, t)
-      )
-    ),
+            <div style={{ display:"flex", gap:10 }}>
+              <div style={{ flex:1, background:"#181B23", borderRadius:14, padding:"10px 13px", border:"1px solid #22252F" }}>
+                <div style={{ fontSize:10, color:"#6B7280", textTransform:"uppercase", letterSpacing:1.5, marginBottom:4 }}>
+                  <span style={{color:"#6EE7B7"}}>↑</span>  В этом месяце
+                </div>
+                <CurrencyTotals map={monthIncMap} color="#6EE7B7" />
+              </div>
+              <div style={{ flex:1, background:"#181B23", borderRadius:14, padding:"10px 13px", border:"1px solid #22252F" }}>
+                <div style={{ fontSize:10, color:"#6B7280", textTransform:"uppercase", letterSpacing:1.5, marginBottom:4 }}>
+                  <span style={{color:"#F87171"}}>↓</span>  В этом месяце
+                </div>
+                <CurrencyTotals map={monthExpMap} color="#F87171" />
+              </div>
+            </div>
+          </div>
 
-    // ══ OVERVIEW ═════════════════════════════════════════════════════════
-    tab===0 && h("div", { style:{ padding:"14px" } },
+          {/* TABS */}
+          <div style={{ display:"flex", background:"#181B23", borderBottom:"1px solid #22252F", position:"sticky", top:0, zIndex:10 }}>
+            {TABS.map((t,i) => (
+              <button key={t} onClick={()=>setTab(i)}
+                style={{ flex:1, padding:"12px 0", background:"none", border:"none",
+                         color: tab===i?"#6EE7B7":"#6B7280", fontWeight: tab===i?600:400, fontSize:13,
+                         borderBottom: tab===i?"2px solid #6EE7B7":"2px solid transparent", transition:"all .2s" }}>
+                {t}
+              </button>
+            ))}
+          </div>
 
-      // Бюджет (в BYN)
-      h("div", { style:card },
-        h("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 } },
-          h("div", null,
-            h("div", { style:{ fontSize:11, color:"#9CA3AF", textTransform:"uppercase", letterSpacing:1 } }, "Бюджет месяца"),
-            h("div", { style:{ fontSize:10, color:"#4B5563", marginTop:2 } }, "в белорусских рублях")
-          ),
-          h("button", { onClick:()=>{ setEditBudget(!editBudget); setBudgetInput(String(budget)); },
-            style:{ background:"#22252F", border:"none", color:"#6EE7B7", borderRadius:8, padding:"4px 10px", fontSize:12 }
-          }, editBudget ? "✕" : "Задать")
-        ),
-        editBudget
-          ? h("div", { style:{ display:"flex", gap:8 } },
-              h("input", { type:"number", value:budgetInput, onChange:ev=>setBudgetInput(ev.target.value),
-                placeholder:"Сумма в Br", style:{ ...inp, flex:1, fontSize:18, fontFamily:"'DM Mono',monospace" } }),
-              h("button", { onClick:saveBudget,
-                style:{ background:"#6EE7B7", border:"none", borderRadius:10, padding:"10px 16px", color:"#0D0F14", fontWeight:700, fontSize:14 }
-              }, "ОК")
-            )
-          : h("div", null,
-              h("div", { style:{ fontSize:20, fontWeight:700, fontFamily:"'DM Mono',monospace" } },
-                budget > 0 ? fmt(budget, DEFAULT_CURRENCY)
-                           : h("span",{style:{color:"#374151",fontSize:14}},"Не задан — нажмите «Задать»")
-              ),
-              budget > 0 && h("div", null,
-                h("div", { style:{ marginTop:10, height:6, background:"#22252F", borderRadius:99, overflow:"hidden" } },
-                  h("div", { style:{ height:"100%", width:`${pct}%`, background:pctColor, borderRadius:99 } })
-                ),
-                h("div", { style:{ marginTop:5, fontSize:12, color:"#6B7280" } },
-                  fmt(totalExpenseBYN, DEFAULT_CURRENCY) + " из " + fmt(budget, DEFAULT_CURRENCY) + " · " + pct.toFixed(0) + "%",
-                  pct > 85 && h("span",{style:{color:"#F87171",marginLeft:6}},"⚠ Лимит!")
-                )
-              )
-            )
-      ),
+          {/* 0: OVERVIEW */}
+          {tab===0 && (
+            <div style={{ padding:"14px" }}>
+              <div style={card}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                  <div>
+                    <div style={{ fontSize:11, color:"#9CA3AF", textTransform:"uppercase", letterSpacing:1 }}>Бюджет месяца</div>
+                    <div style={{ fontSize:10, color:"#4B5563", marginTop:2 }}>в белорусских рублях</div>
+                  </div>
+                  <button onClick={() => { setEditBudget(!editBudget); setBudgetInput(String(budget)); }}
+                    style={{ background:"#22252F", border:"none", color:"#6EE7B7", borderRadius:8, padding:"4px 10px", fontSize:12 }}>
+                    {editBudget ? "✕" : "Задать"}
+                  </button>
+                </div>
+                {editBudget ? (
+                  <div style={{ display:"flex", gap:8 }}>
+                    <input type="number" value={budgetInput} onChange={ev=>setBudgetInput(ev.target.value)}
+                      placeholder="Сумма в Br" style={{ ...inp, flex:1, fontSize:18, fontFamily:"'DM Mono',monospace" }} />
+                    <button onClick={saveBudget}
+                      style={{ background:"#6EE7B7", border:"none", borderRadius:10, padding:"10px 16px", color:"#0D0F14", fontWeight:700, fontSize:14 }}>
+                      ОК
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize:20, fontWeight:700, fontFamily:"'DM Mono',monospace" }}>
+                      {budget > 0 ? fmt(budget, DEFAULT_CURRENCY) : <span style={{color:"#374151",fontSize:14}}>Не задан</span>}
+                    </div>
+                    {budget > 0 && (
+                      <div>
+                        <div style={{ marginTop:10, height:6, background:"#22252F", borderRadius:99, overflow:"hidden" }}>
+                          <div style={{ height:"100%", width:`${pct}%`, background:pctColor, borderRadius:99 }} />
+                        </div>
+                        <div style={{ marginTop:5, fontSize:12, color:"#6B7280" }}>
+                          {fmt(monthTotalExpBYN, DEFAULT_CURRENCY)} из {fmt(budget, DEFAULT_CURRENCY)} · {pct.toFixed(0)}%
+                          {pct > 85 && <span style={{color:"#F87171",marginLeft:6}}>⚠ Лимит!</span>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
-      // Диаграмма (расходы в BYN)
-      expByCat.length > 0 && h("div", { style:card },
-        h("div", { style:{ fontSize:11, color:"#9CA3AF", textTransform:"uppercase", letterSpacing:1, marginBottom:4 } }, "Расходы по категориям"),
-        h("div", { style:{ fontSize:10, color:"#4B5563", marginBottom:10 } }, "только в BYN"),
-        h(DonutChart, { data: expByCat })
-      ),
+              {expByCat.length > 0 && (
+                <div style={card}>
+                  <div style={{ fontSize:11, color:"#9CA3AF", textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>Расходы по категориям</div>
+                  <div style={{ fontSize:10, color:"#4B5563", marginBottom:10 }}>за {formatMonth(monthStr)} (в BYN)</div>
+                  <DonutChart data={expByCat} />
+                </div>
+              )}
 
-      // Последние операции
-      h("div", { style:card },
-        h("div", { style:{ fontSize:11, color:"#9CA3AF", textTransform:"uppercase", letterSpacing:1, marginBottom:10 } }, "Последние операции"),
-        txs.length === 0
-          ? h("div",{style:{color:"#374151",fontSize:14,textAlign:"center",padding:"20px 0"}},"Нет операций. Перейдите во вкладку «Добавить» 👆")
-          : txs.slice(0,5).map(tx => {
-              const cat = getCat(tx.category);
-              const cur = getCurrency(tx.currency || DEFAULT_CURRENCY);
-              return h("div",{key:tx.id,style:{display:"flex",alignItems:"center",gap:11,padding:"9px 0",borderBottom:"1px solid #22252F"}},
-                h("div",{style:{width:38,height:38,borderRadius:11,background:"#22252F",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}},cat.icon),
-                h("div",{style:{flex:1,minWidth:0}},
-                  h("div",{style:{fontSize:14,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},tx.note||cat.label),
-                  h("div",{style:{fontSize:11,color:"#6B7280",marginTop:1}},cat.label+" · "+fmtDate(tx.date))
-                ),
-                h("div",{style:{textAlign:"right",flexShrink:0}},
-                  h("div",{style:{fontFamily:"'DM Mono',monospace",fontWeight:600,fontSize:14,color:tx.type==="income"?"#6EE7B7":"#F87171"}},
-                    (tx.type==="income"?"+":"-")+fmt(tx.amount, tx.currency)
-                  ),
-                  h("div",{style:{fontSize:10,color:"#4B5563",marginTop:1}},cur.flag+" "+cur.id)
-                )
-              );
-            }),
-        txs.length > 5 && h("button",{onClick:()=>setTab(1),
-          style:{width:"100%",marginTop:8,background:"none",border:"none",color:"#6EE7B7",fontSize:13}},"Показать все →")
-      )
-    ),
+              <div style={card}>
+                <div style={{ fontSize:11, color:"#9CA3AF", textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>Операции месяца</div>
+                {monthlyTxs.length === 0 ? (
+                  <div style={{color:"#374151",fontSize:14,textAlign:"center",padding:"20px 0"}}>В этом месяце пусто.</div>
+                ) : (
+                  monthlyTxs.slice(0,5).map(tx => {
+                    const cat = getCatObj(tx.category);
+                    const cur = getCurrency(tx.currency || DEFAULT_CURRENCY);
+                    return (
+                      <div key={tx.id} style={{display:"flex",alignItems:"center",gap:11,padding:"9px 0",borderBottom:"1px solid #22252F"}}>
+                        <div style={{width:38,height:38,borderRadius:11,background:"#22252F",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{cat.icon}</div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:14,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tx.note||cat.label}</div>
+                          <div style={{fontSize:11,color:"#6B7280",marginTop:1}}>{cat.label} · {fmtDate(tx.date)}</div>
+                        </div>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          <div style={{fontFamily:"'DM Mono',monospace",fontWeight:600,fontSize:14,color:tx.type==="income"?"#6EE7B7":"#F87171"}}>
+                            {(tx.type==="income"?"+":"-")+fmt(tx.amount, tx.currency)}
+                          </div>
+                          <div style={{fontSize:10,color:"#4B5563",marginTop:1}}>{cur.flag} {cur.id}</div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                {monthlyTxs.length > 5 && (
+                  <button onClick={()=>setTab(1)} style={{width:"100%",marginTop:8,background:"none",border:"none",color:"#6EE7B7",fontSize:13}}>
+                    Показать все →
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
-    // ══ HISTORY ══════════════════════════════════════════════════════════
-    tab===1 && h("div", { style:{ padding:"14px" } },
-      h("div",{style:{display:"flex",gap:8,marginBottom:12}},
-        [["all","Все"],["income","Доходы"],["expense","Расходы"]].map(([v,l])=>
-          h("button",{key:v,onClick:()=>setFilter(v),
-            style:{flex:1,padding:"9px 0",background:filter===v?"#6EE7B7":"#181B23",border:"none",
-                   borderRadius:10,color:filter===v?"#0D0F14":"#9CA3AF",fontWeight:filter===v?700:400,fontSize:13}},l)
-        )
-      ),
-      filtered.length===0
-        ? h("div",{style:{color:"#374151",fontSize:14,textAlign:"center",padding:"40px 0"}},"Нет операций")
-        : filtered.map(tx => {
-            const cat = getCat(tx.category);
-            const cur = getCurrency(tx.currency || DEFAULT_CURRENCY);
-            return h("div",{key:tx.id,style:{display:"flex",alignItems:"center",gap:11,padding:"11px 13px",
-                                              background:"#181B23",borderRadius:14,marginBottom:8,border:"1px solid #22252F"}},
-              h("div",{style:{width:40,height:40,borderRadius:11,background:"#22252F",display:"flex",alignItems:"center",justifyContent:"center",fontSize:21,flexShrink:0}},cat.icon),
-              h("div",{style:{flex:1,minWidth:0}},
-                h("div",{style:{fontSize:14,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},tx.note||cat.label),
-                h("div",{style:{fontSize:11,color:"#6B7280",marginTop:2}},cat.label+" · "+fmtDate(tx.date))
-              ),
-              h("div",{style:{textAlign:"right",flexShrink:0}},
-                h("div",{style:{fontFamily:"'DM Mono',monospace",fontWeight:600,fontSize:14,color:tx.type==="income"?"#6EE7B7":"#F87171"}},
-                  (tx.type==="income"?"+":"-")+fmt(tx.amount, tx.currency)
-                ),
-                h("div",{style:{fontSize:10,color:"#4B5563",marginTop:1}},cur.flag+" "+cur.id),
-                h("button",{onClick:()=>saveTxs(txs.filter(t=>t.id!==tx.id)),
-                  style:{background:"none",border:"none",color:"#4B5563",fontSize:11,marginTop:2}},"удалить")
-              )
-            );
-          })
-    ),
+          {/* 1: HISTORY */}
+          {tab===1 && (
+            <div style={{ padding:"14px" }}>
+              <div style={{display:"flex",gap:8,marginBottom:12}}>
+                {[["all","Все"],["income","Доходы"],["expense","Расходы"]].map(([v,l])=> (
+                  <button key={v} onClick={()=>{ setFilter(v); setCatFilter("all"); }}
+                    style={{flex:1,padding:"9px 0",background:filter===v?"#6EE7B7":"#181B23",border:"none",
+                           borderRadius:10,color:filter===v?"#0D0F14":"#9CA3AF",fontWeight:filter===v?700:400,fontSize:13}}>
+                    {l}
+                  </button>
+                ))}
+              </div>
 
-    // ══ ADD ══════════════════════════════════════════════════════════════
-    tab===2 && h("div", { style:{ padding:"14px" } },
-      h("div", { style:card },
+              <div className="hide-scroll" style={{ display:"flex", gap:8, overflowX:"auto", marginBottom:16 }}>
+                <button onClick={() => setCatFilter("all")}
+                  style={{ whiteSpace:"nowrap", padding:"6px 12px", borderRadius:12, border:"1px solid #22252F", fontSize:12, 
+                           background: catFilter==="all" ? "#6EE7B7" : "#181B23", color: catFilter==="all" ? "#0D0F14" : "#9CA3AF" }}>
+                  Все источники
+                </button>
+                {availableFilterCats.map(c => (
+                  <button key={c.id} onClick={() => setCatFilter(c.id)}
+                    style={{ whiteSpace:"nowrap", padding:"6px 12px", borderRadius:12, border:"1px solid #22252F", fontSize:12, 
+                             background: catFilter===c.id ? "#6EE7B7" : "#181B23", color: catFilter===c.id ? "#0D0F14" : "#9CA3AF" }}>
+                    {c.icon} {c.label}
+                  </button>
+                ))}
+              </div>
 
-        // Тип (расход / доход)
-        h("div",{style:{display:"flex",background:"#22252F",borderRadius:12,padding:4,marginBottom:16}},
-          [["expense","Расход","#F87171"],["income","Доход","#6EE7B7"]].map(([v,l,c])=>
-            h("button",{key:v,onClick:()=>setForm(f=>({...f,type:v,category:v==="income"?"salary":"food"})),
-              style:{flex:1,padding:"10px 0",background:form.type===v?c:"transparent",border:"none",
-                     borderRadius:9,color:form.type===v?"#0D0F14":"#6B7280",fontWeight:form.type===v?700:400,fontSize:15}},l)
-          )
-        ),
+              {filteredTxs.length===0 ? (
+                <div style={{color:"#374151",fontSize:14,textAlign:"center",padding:"40px 0"}}>Нет операций за {formatMonth(monthStr)}</div>
+              ) : (
+                filteredTxs.map(tx => {
+                  const cat = getCatObj(tx.category);
+                  const cur = getCurrency(tx.currency || DEFAULT_CURRENCY);
+                  return (
+                    <div key={tx.id} style={{display:"flex",alignItems:"center",gap:11,padding:"11px 13px",background:"#181B23",borderRadius:14,marginBottom:8,border:"1px solid #22252F"}}>
+                      <div style={{width:40,height:40,borderRadius:11,background:"#22252F",display:"flex",alignItems:"center",justifyContent:"center",fontSize:21,flexShrink:0}}>{cat.icon}</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:14,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tx.note||cat.label}</div>
+                        <div style={{fontSize:11,color:"#6B7280",marginTop:2}}>{cat.label} · {fmtDate(tx.date)}</div>
+                      </div>
+                      <div style={{textAlign:"right",flexShrink:0}}>
+                        <div style={{fontFamily:"'DM Mono',monospace",fontWeight:600,fontSize:14,color:tx.type==="income"?"#6EE7B7":"#F87171"}}>
+                          {(tx.type==="income"?"+":"-")+fmt(tx.amount, tx.currency)}
+                        </div>
+                        <div style={{fontSize:10,color:"#4B5563",marginTop:1}}>{cur.flag} {cur.id}</div>
+                        <button onClick={()=>handleDelete(tx.id)} style={{background:"none",border:"none",color:"#4B5563",fontSize:11,marginTop:2}}>
+                          удалить
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
 
-        // Сумма + Валюта рядом
-        h("div",{style:{marginBottom:13}},
-          h("label",{style:lbl},"Сумма и валюта"),
-          h("div",{style:{display:"flex",gap:8}},
-            h("div",{style:{position:"relative",flex:1}},
-              h("input",{type:"number",inputMode:"decimal",placeholder:"0",value:form.amount,
-                onChange:ev=>setForm(f=>({...f,amount:ev.target.value})),
-                style:{...inp,paddingRight:14,fontSize:22,fontFamily:"'DM Mono',monospace"}}),
-            ),
-            // Кнопки валюты
-            h("div",{style:{display:"flex",flexDirection:"column",gap:4}},
-              // Две строки по 2 валюты
-              h("div",{style:{display:"flex",gap:4}},
-                CURRENCIES.slice(0,2).map(cur =>
-                  h("button",{key:cur.id,onClick:()=>setForm(f=>({...f,currency:cur.id})),
-                    style:{
-                      padding:"0 10px",height:36,borderRadius:8,border:"none",fontSize:13,fontWeight:600,
-                      background: form.currency===cur.id ? (form.type==="income"?"#6EE7B7":"#F87171") : "#22252F",
-                      color: form.currency===cur.id ? "#0D0F14" : "#9CA3AF",
-                      transition:"all .15s",
-                    }
-                  }, cur.id)
-                )
-              ),
-              h("div",{style:{display:"flex",gap:4}},
-                CURRENCIES.slice(2,4).map(cur =>
-                  h("button",{key:cur.id,onClick:()=>setForm(f=>({...f,currency:cur.id})),
-                    style:{
-                      padding:"0 10px",height:36,borderRadius:8,border:"none",fontSize:13,fontWeight:600,
-                      background: form.currency===cur.id ? (form.type==="income"?"#6EE7B7":"#F87171") : "#22252F",
-                      color: form.currency===cur.id ? "#0D0F14" : "#9CA3AF",
-                      transition:"all .15s",
-                    }
-                  }, cur.id)
-                )
-              ),
-            )
-          ),
-          // Подпись выбранной валюты
-          h("div",{style:{marginTop:6,fontSize:12,color:"#6B7280"}},
-            getCurrency(form.currency).flag + "  " + getCurrency(form.currency).label
-          )
-        ),
+          {/* 2: ADD */}
+          {tab===2 && (
+            <div style={{ padding:"14px" }}>
+              <div style={card}>
+                <div style={{display:"flex",background:"#22252F",borderRadius:12,padding:4,marginBottom:16}}>
+                  {[["expense","Расход","#F87171"],["income","Доход","#6EE7B7"]].map(([v,l,c])=> (
+                    <button key={v} onClick={()=>setForm(f=>({...f,type:v}))}
+                      style={{flex:1,padding:"10px 0",background:form.type===v?c:"transparent",border:"none",
+                             borderRadius:9,color:form.type===v?"#0D0F14":"#6B7280",fontWeight:form.type===v?700:400,fontSize:15}}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
 
-        // Категория
-        h("div",{style:{marginBottom:13}},
-          h("label",{style:lbl},"Категория"),
-          h("div",{style:{display:"flex",flexWrap:"wrap",gap:6}},
-            CATS[form.type].map(cat=>
-              h("button",{key:cat.id,onClick:()=>setForm(f=>({...f,category:cat.id})),
-                style:{display:"flex",alignItems:"center",gap:5,borderRadius:10,padding:"6px 10px",fontSize:13,
-                       background:form.category===cat.id?(form.type==="income"?"#064E3B":"#450A0A"):"#22252F",
-                       border:`1px solid ${form.category===cat.id?(form.type==="income"?"#6EE7B7":"#F87171"):"transparent"}`,
-                       color:form.category===cat.id?(form.type==="income"?"#6EE7B7":"#F87171"):"#9CA3AF"}
-              }, cat.icon+" "+cat.label)
-            )
-          )
-        ),
+                <div style={{marginBottom:13}}>
+                  <label style={lbl}>Сумма и валюта</label>
+                  <div style={{display:"flex",gap:8}}>
+                    <div style={{position:"relative",flex:1}}>
+                      <input type="number" inputMode="decimal" placeholder="0" value={form.amount}
+                        onChange={ev=>setForm(f=>({...f,amount:ev.target.value}))}
+                        style={{...inp,paddingRight:14,fontSize:22,fontFamily:"'DM Mono',monospace"}} />
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                      <div style={{display:"flex",gap:4}}>
+                        {CURRENCIES.slice(0,2).map(cur => (
+                          <button key={cur.id} onClick={()=>setForm(f=>({...f,currency:cur.id}))}
+                            style={{ padding:"0 10px",height:36,borderRadius:8,border:"none",fontSize:13,fontWeight:600,
+                                     background: form.currency===cur.id ? (form.type==="income"?"#6EE7B7":"#F87171") : "#22252F",
+                                     color: form.currency===cur.id ? "#0D0F14" : "#9CA3AF", transition:"all .15s" }}>
+                            {cur.id}
+                          </button>
+                        ))}
+                      </div>
+                      <div style={{display:"flex",gap:4}}>
+                        {CURRENCIES.slice(2,4).map(cur => (
+                          <button key={cur.id} onClick={()=>setForm(f=>({...f,currency:cur.id}))}
+                            style={{ padding:"0 10px",height:36,borderRadius:8,border:"none",fontSize:13,fontWeight:600,
+                                     background: form.currency===cur.id ? (form.type==="income"?"#6EE7B7":"#F87171") : "#22252F",
+                                     color: form.currency===cur.id ? "#0D0F14" : "#9CA3AF", transition:"all .15s" }}>
+                            {cur.id}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
-        // Заметка
-        h("div",{style:{marginBottom:13}},
-          h("label",{style:lbl},"Заметка"),
-          h("input",{placeholder:"Необязательно…",value:form.note,onChange:ev=>setForm(f=>({...f,note:ev.target.value})),style:inp})
-        ),
+                <div style={{marginBottom:13}}>
+                  <label style={lbl}>Категория</label>
+                  {cats[form.type].length === 0 ? (
+                    <div style={{fontSize:13,color:"#6B7280"}}>Нет категорий. Добавьте их в «Настройках».</div>
+                  ) : (
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                      {cats[form.type].map(cat=> (
+                        <button key={cat.id} onClick={()=>setForm(f=>({...f,category:cat.id}))}
+                          style={{display:"flex",alignItems:"center",gap:5,borderRadius:10,padding:"6px 10px",fontSize:13,
+                                 background:form.category===cat.id?(form.type==="income"?"#064E3B":"#450A0A"):"#22252F",
+                                 border:`1px solid ${form.category===cat.id?(form.type==="income"?"#6EE7B7":"#F87171"):"transparent"}`,
+                                 color:form.category===cat.id?(form.type==="income"?"#6EE7B7":"#F87171"):"#9CA3AF"}}>
+                          {cat.icon} {cat.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
-        // Дата
-        h("div",{style:{marginBottom:20}},
-          h("label",{style:lbl},"Дата"),
-          h("input",{type:"date",value:form.date,onChange:ev=>setForm(f=>({...f,date:ev.target.value})),style:inp})
-        ),
+                <div style={{marginBottom:13}}>
+                  <label style={lbl}>Заметка</label>
+                  <input placeholder="Необязательно…" value={form.note} onChange={ev=>setForm(f=>({...f,note:ev.target.value}))} style={inp} />
+                </div>
 
-        h("button",{onClick:handleAdd,style:{
-          width:"100%",padding:"14px 0",border:"none",borderRadius:14,color:"#fff",fontWeight:700,fontSize:17,
-          background:form.type==="income"?"linear-gradient(90deg,#059669,#34D399)":"linear-gradient(90deg,#DC2626,#F87171)",
-          boxShadow:form.type==="income"?"0 4px 20px rgba(52,211,153,.25)":"0 4px 20px rgba(248,113,113,.25)"
-        }}, saved ? "✓ Добавлено!" : "Добавить " + (form.type==="income"?"доход":"расход"))
-      )
-    )
-  );
-}
+                <div style={{marginBottom:20}}>
+                  <label style={lbl}>Дата</label>
+                  <input type="date" value={form.date} onChange={ev=>setForm(f=>({...f,date:ev.target.value}))} style={inp} />
+                </div>
 
-ReactDOM.createRoot(document.getElementById("app")).render(h(App));
-</script>
-<script>
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").then(() => console.log("SW registered"));
-}
-</script>
+                <button onClick={handleAdd} style={{
+                  width:"100%",padding:"14px 0",border:"none",borderRadius:14,color:"#fff",fontWeight:700,fontSize:17,
+                  background:form.type==="income"?"linear-gradient(90deg,#059669,#34D399)":"linear-gradient(90deg,#DC2626,#F87171)",
+                  boxShadow:form.type==="income"?"0 4px 20px rgba(52,211,153,.25)":"0 4px 20px rgba(248,113,113,.25)",
+                  opacity: !form.category || !form.amount ? 0.5 : 1
+                }}>
+                  {saved ? "✓ Добавлено!" : `Добавить ${form.type==="income"?"доход":"расход"}`}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 3: SETTINGS */}
+          {tab===3 && (
+            <div style={{ padding:"14px" }}>
+              <div style={{...card, display:"flex", alignItems:"center", justifyContent:"space-between"}}>
+                <div>
+                  <div style={lbl}>Аккаунт</div>
+                  <div style={{fontSize:15, fontWeight:500, color:"#E8EAF0"}}>
+                    {user.isAnonymous ? "Гостевой режим" : user.email}
+                  </div>
+                  {user.isAnonymous && <div style={{fontSize:11, color:"#9CA3AF", marginTop:4}}>Данные доступны только на этом устройстве</div>}
+                </div>
+                <button onClick={handleLogout} style={{background:"#22252F", border:"none", borderRadius:10, padding:"8px 12px", color:"#F87171", fontSize:13, fontWeight:600}}>
+                  Выйти
+                </button>
+              </div>
+
+              <div style={card}>
+                <div style={{ fontSize:11, color:"#9CA3AF", textTransform:"uppercase", letterSpacing:1, marginBottom:16 }}>Управление категориями</div>
+                <div style={{display:"flex",background:"#22252F",borderRadius:12,padding:4,marginBottom:16}}>
+                  {[["expense","Расходы"],["income","Доходы"]].map(([v,l])=> (
+                    <button key={v} onClick={()=>setSettingsTab(v)}
+                      style={{flex:1,padding:"8px 0",background:settingsTab===v?"#374151":"transparent",border:"none",
+                             borderRadius:9,color:settingsTab===v?"#fff":"#9CA3AF",fontWeight:settingsTab===v?600:400,fontSize:14}}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{display:"flex",gap:8,marginBottom:20}}>
+                  <input value={newCatIcon} onChange={e=>setNewCatIcon(e.target.value)} maxLength={2} 
+                         style={{...inp, width:52, textAlign:"center", padding:"11px 0"}} title="Иконка (эмодзи)" />
+                  <input value={newCatLabel} onChange={e=>setNewCatLabel(e.target.value)} placeholder="Название..." 
+                         style={{...inp, flex:1}} />
+                  <button onClick={saveCategory} style={{ background:"#6EE7B7", border:"none", borderRadius:12, padding:"0 16px", color:"#0D0F14", fontWeight:700, fontSize:20 }}>
+                    +
+                  </button>
+                </div>
+
+                <div style={{display:"flex", flexDirection:"column", gap:8}}>
+                  {(cats[settingsTab === 'account' ? 'expense' : settingsTab] || []).map(c => (
+                    <div key={c.id} style={{display:"flex", justifyContent:"space-between", alignItems:"center", background:"#22252F", padding:"10px 14px", borderRadius:12}}>
+                      <div style={{display:"flex", alignItems:"center", gap:10}}>
+                        <span style={{fontSize:20}}>{c.icon}</span>
+                        <span style={{fontSize:15, color:"#E8EAF0"}}>{c.label}</span>
+                      </div>
+                      <button onClick={() => deleteCategory(c.id)} style={{background:"none", border:"none", color:"#F87171", fontSize:12, padding:4}}>
+                        Удалить
+                      </button>
+                    </div>
+                  ))}
+                  {(cats[settingsTab === 'account' ? 'expense' : settingsTab] || []).length === 0 && (
+                    <div style={{color:"#6B7280", fontSize:13, textAlign:"center", padding:"10px 0"}}>Здесь пока нет категорий.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+
+  <!-- Service Worker (для работы оффлайн) -->
+  <script>
+    // Регистрируем SW только если протокол поддерживается (исключает ошибки Blob / File)
+    if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.protocol === 'http:')) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(err => console.error('SW Error:', err));
+      });
+    } else {
+      console.warn('Service Worker не зарегистрирован: неподдерживаемый протокол. Для работы оффлайн используйте HTTP/HTTPS.');
+    }
+  </script>
 </body>
 </html>
