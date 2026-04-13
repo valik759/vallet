@@ -1,13 +1,13 @@
 // Vallet Service Worker — network-first
-const CACHE = 'vallet-v3';
+const CACHE = 'vallet-v4';
 
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE).then(c => c.addAll([
-      '/index.html',
-      '/manifest.json',
-      '/icons/vallet-icon-192x192.png',
-      '/icons/vallet-icon-512x512.png'
+      './index.html',
+      './manifest.json',
+      './icons/vallet-icon-192x192.png',
+      './icons/vallet-icon-512x512.png'
     ])).then(() => self.skipWaiting())
   );
 });
@@ -45,13 +45,13 @@ self.addEventListener('push', e => {
   const d = e.data ? e.data.json() : {};
   e.waitUntil(self.registration.showNotification(d.title || 'Vallet', {
     body: d.body || '',
-    icon: '/icons/vallet-icon-192x192.png',
-    badge: '/icons/vallet-icon-48x48.png',
+    icon: './icons/vallet-icon-192x192.png',
+    badge: './icons/vallet-icon-48x48.png',
     vibrate: [100, 50, 100]
   }));
 });
 
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  e.waitUntil(clients.openWindow('/index.html'));
+  e.waitUntil(clients.openWindow('./index.html'));
 });
